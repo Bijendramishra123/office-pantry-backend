@@ -1,3 +1,7 @@
+// ✅ DNS fix for MongoDB Atlas SRV resolution (IMPORTANT)
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first');
+
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -16,7 +20,7 @@ const categoryRoutes = require('./routes/category.routes');
 const orderRoutes = require('./routes/order.routes');
 const inventoryRoutes = require('./routes/inventory.routes');
 const reportRoutes = require('./routes/report.routes');
-const notificationRoutes = require('./routes/notification.routes'); // NEW: Notification routes
+const notificationRoutes = require('./routes/notification.routes');
 
 // Initialize Express app
 const app = express();
@@ -24,10 +28,17 @@ const app = express();
 // Create HTTP server for Socket.io
 const server = http.createServer(app);
 
+// ✅ Allow multiple frontend origins
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3001',
+  process.env.FRONTEND_URL
+];
+
 // Initialize Socket.io with CORS configuration
 const io = socketio(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: allowedOrigins,
     methods: ['GET', 'POST'],
     credentials: true
   }
@@ -40,25 +51,22 @@ const connectedUsers = {};
 io.on('connection', (socket) => {
   console.log('🔌 New client connected:', socket.id);
 
-  // Handle user authentication via socket
   socket.on('authenticate', (userId) => {
     if (userId) {
       connectedUsers[userId] = socket.id;
       socket.join(`user_${userId}`);
       console.log(`✅ User ${userId} authenticated for real-time updates`);
-      
-      // Send welcome message
-      socket.emit('connected', { 
+
+      socket.emit('connected', {
         message: 'Connected to real-time notifications',
-        userId 
+        userId
       });
     }
   });
 
-  // Handle order status updates from admin
   socket.on('order_status_update', (data) => {
     const { orderId, userId, status, orderNumber } = data;
-    
+
     if (userId) {
       io.to(`user_${userId}`).emit('order_updated', {
         orderId,
@@ -71,10 +79,9 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handle notification sending
   socket.on('send_notification', (data) => {
     const { userId, title, message, type } = data;
-    
+
     if (userId) {
       io.to(`user_${userId}`).emit('new_notification', {
         title,
@@ -86,9 +93,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handle disconnect
   socket.on('disconnect', () => {
-    // Remove user from connected users
     for (const [userId, socketId] of Object.entries(connectedUsers)) {
       if (socketId === socket.id) {
         delete connectedUsers[userId];
@@ -103,11 +108,12 @@ io.on('connection', (socket) => {
 // Make io accessible to routes
 app.set('socketio', io);
 
-// Middleware
+// ✅ Updated CORS middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: allowedOrigins,
   credentials: true
 }));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -127,12 +133,12 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/reports', reportRoutes);
-app.use('/api/notifications', notificationRoutes); // NEW: Notification routes
+app.use('/api/notifications', notificationRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'OK', 
+  res.status(200).json({
+    status: 'OK',
     message: 'Office Pantry Management System API is running',
     timestamp: new Date().toISOString(),
     connectedUsers: Object.keys(connectedUsers).length,
@@ -177,7 +183,7 @@ server.listen(PORT, () => {
   console.log(`🔌 Real-time notifications: Enabled`);
   console.log(`🏥 Health check: http://localhost:${PORT}/api/health`);
   console.log(`📊 Socket status: http://localhost:${PORT}/api/socket-status`);
-  console.log(`🔗 CORS enabled for: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
+  console.log(`🔗 CORS enabled for:`, allowedOrigins);
 });
 
 module.exports = { app, server, io };
